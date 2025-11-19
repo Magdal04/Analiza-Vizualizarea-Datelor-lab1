@@ -9,390 +9,578 @@ from io import BytesIO
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import datetime
+from pathlib import Path
+import tempfile
+import os
 
-# Professional styling
+# Professional configuration
 st.set_page_config(
-    page_title="Energy Data Analysis Dashboard", 
+    page_title="Energy Data Analytics Dashboard", 
     layout="wide",
-    page_icon="⚡"
+    page_icon="⚡",
+    initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better appearance
+# Enhanced custom CSS
 st.markdown("""
 <style>
     .main-header {
-        font-size: 2.5rem;
+        font-size: 2.8rem;
         color: #1f77b4;
         text-align: center;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
+        font-weight: 700;
     }
     .section-header {
-        font-size: 1.5rem;
+        font-size: 1.6rem;
         color: #2e86ab;
-        border-bottom: 2px solid #2e86ab;
+        border-bottom: 3px solid #2e86ab;
         padding-bottom: 0.5rem;
-        margin-top: 2rem;
+        margin: 2rem 0 1rem 0;
+        font-weight: 600;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+    }
+    .sidebar .sidebar-content {
+        background: #f8f9fa;
     }
 </style>
 """, unsafe_allow_html=True)
 
 @st.cache_data
-def load_data():
-    df = pd.read_csv("Data Analysis/lab1/raw_energy_data.csv", parse_dates=["date"])
+def load_data(uploaded_file=None):
+    """Load and process energy data"""
+    try:
+        if uploaded_file is not None:
+            df = pd.read_csv(uploaded_file, parse_dates=["date"])
+            st.success(f"✓ File uploaded successfully: {len(df)} records")
+        else:
+            df = pd.read_csv("lab1/raw_energy_data.csv", parse_dates=["date"])
+            st.info("✓ Using default dataset")
+        
+        # Enhanced feature engineering
+        df['an'] = df["date"].dt.year
+        df['luna'] = df["date"].dt.month
+        df['ziua'] = df['date'].dt.day
+        df['ora'] = df["date"].dt.hour
+        df['ziua_saptamanii'] = df["date"].dt.day_name()
+        df['weekend'] = df["date"].dt.day_of_week >= 5
+        df['trimestru'] = df['date'].dt.quarter
+        
+        # Energy calculations
+        df['total_regenerabila'] = df[['hidro', 'fotovolt', 'eolian', 'biomasa']].sum(axis=1)
+        df['total_neregenerabila'] = df[['carbune', 'hidrocarburi', 'nuclear']].sum(axis=1)
+        df['procent_regenerabila'] = (df['total_regenerabila'] / df['productie'] * 100).fillna(0)
+        df['sold_energetic'] = df['productie'] - df['consum']
+        df['eficienta_retea'] = (df['productie'] / df['consum'] * 100).clip(0, 200)
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"❌ Error loading data: {str(e)}")
+        return None
+
+def create_professional_metrics(df):
+    """Create enhanced metric cards"""
+    col1, col2, col3, col4 = st.columns(4)
     
-    # Enhanced feature engineering
-    df['an'] = df["date"].dt.year
-    df['luna'] = df["date"].dt.month
-    df['ziua'] = df['date'].dt.day
-    df['ora'] = df["date"].dt.hour
-    df['ziua_saptamanii'] = df["date"].dt.day_name()
-    df['weekend'] = df["date"].dt.day_of_week >= 5
-    
-    # Energy calculations
-    df['total_regenerabila'] = df['hidro'] + df['fotovolt'] + df['eolian'] + df['biomasa']
-    df['total_neregenerabila'] = df['carbune'] + df['hidrocarburi'] + df['nuclear']
-    df['procent_regenerabila'] = (df['total_regenerabila'] / df['productie'] * 100).fillna(0)
-    df['sold_energetic'] = df['productie'] - df['consum']
-    
-    return df
-
-df = load_data()
-
-# Header with professional presentation
-st.markdown('<h1 class="main-header">⚡ Energy Production Analysis Dashboard</h1>', unsafe_allow_html=True)
-st.markdown("**Academic Presentation - Data Visualization Course**")
-
-# Key metrics at the top
-st.markdown("---")
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    total_production = df['productie'].sum()
-    st.metric("Total Production", f"{total_production:,.0f} MW")
-with col2:
-    avg_renewable = df['procent_regenerabila'].mean()
-    st.metric("Avg Renewable %", f"{avg_renewable:.1f}%")
-with col3:
-    date_range = f"{df['date'].min().strftime('%Y-%m')} to {df['date'].max().strftime('%Y-%m')}"
-    st.metric("Analysis Period", date_range)
-with col4:
-    energy_balance = df['sold_energetic'].mean()
-    st.metric("Avg Energy Balance", f"{energy_balance:,.0f} MW")
-
-# Enhanced sidebar with better organization
-st.sidebar.header("🎛️ Analysis Parameters")
-
-# Date range with more options
-date_col1, date_col2 = st.sidebar.columns(2)
-with date_col1:
-    start_date = st.date_input("Start Date", 
-                              datetime.date(2024, 1, 1), 
-                              min_value=datetime.date(2024, 1, 1), 
-                              max_value=datetime.date(2025, 10, 31))
-with date_col2:
-    end_date = st.date_input("End Date", 
-                            datetime.date(2025, 10, 31), 
-                            min_value=datetime.date(2024, 1, 1), 
-                            max_value=datetime.date(2025, 10, 31))
-
-# Energy type selection with categories
-st.sidebar.subheader("Energy Source Selection")
-energy_categories = {
-    "Renewable": ['hidro', 'eolian', 'fotovolt', 'biomasa'],
-    "Non-Renewable": ['carbune', 'hidrocarburi', 'nuclear']
-}
-
-selected_sources = []
-for category, sources in energy_categories.items():
-    with st.sidebar.expander(f"{category} Sources"):
-        for source in sources:
-            if st.checkbox(source, value=True, key=source):
-                selected_sources.append(source)
-
-# Analysis granularity
-granularity = st.sidebar.selectbox(
-    "Time Granularity",
-    ["Hourly", "Daily", "Weekly", "Monthly"],
-    index=1
-)
-
-# Visualization theme
-theme = st.sidebar.selectbox(
-    "Chart Theme",
-    ["Seaborn", "Plotly", "Matplotlib", "Dark"]
-)
-
-
-# Apply filters
-filtered_df = df[(df['date'].dt.date >= start_date) & (df['date'].dt.date <= end_date)]
-
-# Tab-based organization for different analyses
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📈 Overview", "🔍 Source Analysis", "🕒 Time Patterns", 
-    "📊 Comparisons", "📋 Data Explorer"
-])
-
-with tab1:
-    st.markdown('<h2 class="section-header">Energy Production Overview</h2>', unsafe_allow_html=True)
-    
-    # Interactive production timeline
-    fig = px.line(filtered_df, x='date', y='productie', 
-                  title='Energy Production Timeline',
-                  labels={'productie': 'Production (MW)', 'date': 'Date'})
-    fig.update_layout(hovermode='x unified')
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Energy mix pie chart
-    col1, col2 = st.columns(2)
     with col1:
-        energy_totals = filtered_df[selected_sources].sum()
-        fig_pie = px.pie(values=energy_totals.values, names=energy_totals.index,
-                        title='Energy Source Distribution')
-        st.plotly_chart(fig_pie, use_container_width=True)
+        avg_production = df['productie'].mean()
+        st.metric(
+            "Average Production", 
+            f"{avg_production:,.0f} MW",
+            delta=f"{df['productie'].std():.0f} MW std"
+        )
     
     with col2:
-        # Renewable vs Non-renewable
-        renewable_avg = filtered_df['procent_regenerabila'].mean()
-        non_renewable_avg = 100 - renewable_avg
+        renewable_pct = df['procent_regenerabila'].mean()
+        st.metric(
+            "Renewable Energy %", 
+            f"{renewable_pct:.1f}%",
+            delta=f"{(df['procent_regenerabila'].max() - renewable_pct):.1f}% max"
+        )
+    
+    with col3:
+        energy_balance = df['sold_energetic'].mean()
+        st.metric(
+            "Net Energy Balance", 
+            f"{energy_balance:+.0f} MW",
+            delta_color="inverse"
+        )
+    
+    with col4:
+        date_range = f"{df['date'].min().strftime('%b %Y')} - {df['date'].max().strftime('%b %Y')}"
+        st.metric("Analysis Period", date_range)
+
+def create_production_overview(df):
+    """Create production overview visualizations"""
+    st.markdown('<h2 class="section-header">Production Overview</h2>', unsafe_allow_html=True)
+    
+    # Main production timeline
+    fig = px.line(df, x='date', y='productie', 
+                  title='Energy Production Timeline',
+                  labels={'productie': 'Production (MW)', 'date': 'Date'},
+                  color_discrete_sequence=['#1f77b4'])
+    fig.update_layout(
+        hovermode='x unified',
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Energy composition
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Stacked area chart of energy sources
+        energy_sources = ['carbune', 'hidro', 'hidrocarburi', 'nuclear', 'eolian', 'fotovolt', 'biomasa']
+        monthly_production = df.groupby(['an', 'luna'])[energy_sources].mean().reset_index()
+        monthly_production['period'] = monthly_production['an'].astype(str) + '-' + monthly_production['luna'].astype(str).str.zfill(2)
         
-        fig_gauge = go.Figure(go.Indicator(
-            mode = "gauge+number",
-            value = renewable_avg,
-            title = {'text': "Renewable Energy Percentage"},
-            gauge = {
-                'axis': {'range': [0, 100]},
-                'bar': {'color': "green"},
-                'steps': [
-                    {'range': [0, 33], 'color': "lightgray"},
-                    {'range': [33, 66], 'color': "gray"}],
-                'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
-                    'value': 90}}
-        ))
-        st.plotly_chart(fig_gauge, use_container_width=True)
-
-with tab2:
-    st.markdown('<h2 class="section-header">Detailed Source Analysis</h2>', unsafe_allow_html=True)
+        fig_area = px.area(monthly_production, x='period', y=energy_sources,
+                          title='Energy Production Composition Over Time',
+                          color_discrete_sequence=px.colors.qualitative.Set3)
+        fig_area.update_layout(showlegend=True, xaxis_title="Period", yaxis_title="Production (MW)")
+        st.plotly_chart(fig_area, use_container_width=True)
     
-    # Multi-line chart for selected sources
-    source_data = filtered_df.groupby('date')[selected_sources].mean().reset_index()
-    fig_sources = px.line(source_data, x='date', y=selected_sources,
-                         title='Energy Production by Source Over Time')
-    st.plotly_chart(fig_sources, use_container_width=True)
-    
-    # Heatmap of production by hour and source
-    heatmap_data = filtered_df.groupby('ora')[selected_sources].mean()
-    fig_heatmap = px.imshow(heatmap_data.T, 
-                           title='Average Production by Hour and Source',
-                           labels=dict(x="Hour of Day", y="Energy Source", color="Production (MW)"))
-    st.plotly_chart(fig_heatmap, use_container_width=True)
+    with col2:
+        # Current energy mix
+        current_totals = df[energy_sources].sum()
+        fig_pie = px.pie(values=current_totals.values, names=current_totals.index,
+                        title='Current Energy Mix Distribution',
+                        color_discrete_sequence=px.colors.qualitative.Set3)
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-with tab3:
+def create_source_analysis(df, selected_sources):
+    """Detailed analysis of energy sources"""
+    st.markdown('<h2 class="section-header">Source Performance Analysis</h2>', unsafe_allow_html=True)
+    
+    if not selected_sources:
+        st.warning("Please select at least one energy source from the sidebar")
+        return
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Source performance over time
+        source_data = df.groupby('date')[selected_sources].mean().reset_index()
+        fig_sources = px.line(source_data, x='date', y=selected_sources,
+                             title='Energy Source Performance Timeline',
+                             labels={'value': 'Production (MW)', 'variable': 'Energy Source'})
+        st.plotly_chart(fig_sources, use_container_width=True)
+    
+    with col2:
+        # Hourly production patterns
+        hourly_patterns = df.groupby('ora')[selected_sources].mean()
+        fig_hourly = px.line(hourly_patterns, 
+                            title='Average Hourly Production Patterns',
+                            labels={'value': 'Production (MW)', 'ora': 'Hour of Day'})
+        st.plotly_chart(fig_hourly, use_container_width=True)
+    
+    # Correlation heatmap
+    st.subheader("Source Correlation Analysis")
+    correlation_matrix = df[selected_sources].corr()
+    fig_corr = px.imshow(correlation_matrix,
+                        title='Energy Source Production Correlations',
+                        color_continuous_scale='RdBu_r',
+                        aspect="auto")
+    st.plotly_chart(fig_corr, use_container_width=True)
+
+def create_temporal_analysis(df):
+    """Analyze temporal patterns"""
     st.markdown('<h2 class="section-header">Temporal Patterns</h2>', unsafe_allow_html=True)
     
-    # Daily patterns
-    daily_patterns = filtered_df.groupby('ora')[['consum', 'productie']].mean()
-    fig_daily = px.line(daily_patterns, title='Daily Consumption vs Production Patterns')
-    st.plotly_chart(fig_daily, use_container_width=True)
+    col1, col2 = st.columns(2)
     
-    # Weekly patterns
-    weekday_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    weekly_data = filtered_df.groupby('ziua_saptamanii')['consum'].mean().reindex(weekday_order)
-    fig_weekly = px.bar(weekly_data, title='Average Consumption by Weekday')
-    st.plotly_chart(fig_weekly, use_container_width=True)
+    with col1:
+        # Daily consumption vs production
+        daily_patterns = df.groupby('ora')[['consum', 'productie']].mean().reset_index()
+        fig_daily = px.line(daily_patterns, x='ora', y=['consum', 'productie'],
+                           title='Daily Consumption vs Production Patterns',
+                           labels={'value': 'Power (MW)', 'ora': 'Hour of Day'},
+                           color_discrete_sequence=['#ff7f0e', '#2ca02c'])
+        st.plotly_chart(fig_daily, use_container_width=True)
+    
+    with col2:
+        # Weekly patterns
+        weekday_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        weekday_labels = ['Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri', 'Sâmbătă', 'Duminică']
+        
+        weekly_data = df.groupby('ziua_saptamanii')['consum'].mean().reindex(weekday_order)
+        fig_weekly = px.bar(x=weekday_labels, y=weekly_data.values,
+                           title='Average Consumption by Weekday',
+                           labels={'y': 'Consumption (MW)', 'x': 'Weekday'},
+                           color=weekly_data.values,
+                           color_continuous_scale='Viridis')
+        st.plotly_chart(fig_weekly, use_container_width=True)
+    
+    # Seasonal analysis
+    st.subheader("Seasonal Production Patterns")
+    seasonal_data = df.groupby('luna').agg({
+        'productie': 'mean',
+        'consum': 'mean',
+        'procent_regenerabila': 'mean'
+    }).reset_index()
+    
+    fig_seasonal = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    fig_seasonal.add_trace(
+        go.Scatter(x=seasonal_data['luna'], y=seasonal_data['productie'],
+                  name="Production", line=dict(color='blue')),
+        secondary_y=False,
+    )
+    
+    fig_seasonal.add_trace(
+        go.Scatter(x=seasonal_data['luna'], y=seasonal_data['procent_regenerabila'],
+                  name="Renewable %", line=dict(color='green', dash='dot')),
+        secondary_y=True,
+    )
+    
+    fig_seasonal.update_layout(title_text="Seasonal Production and Renewable Energy Trends")
+    fig_seasonal.update_xaxes(title_text="Month")
+    fig_seasonal.update_yaxes(title_text="Production (MW)", secondary_y=False)
+    fig_seasonal.update_yaxes(title_text="Renewable %", secondary_y=True)
+    
+    st.plotly_chart(fig_seasonal, use_container_width=True)
 
-with tab4:
+def create_comparative_analysis(df):
+    """Comparative analysis between years and metrics"""
     st.markdown('<h2 class="section-header">Comparative Analysis</h2>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
+    
     with col1:
         # Year-over-year comparison
-        yearly_comparison = filtered_df.groupby('an')[selected_sources].mean()
-        fig_yearly = px.bar(yearly_comparison, barmode='group',
-                           title='Year-over-Year Energy Production Comparison')
+        yearly_stats = df.groupby('an').agg({
+            'productie': 'mean',
+            'consum': 'mean',
+            'procent_regenerabila': 'mean',
+            'sold_energetic': 'mean'
+        }).reset_index()
+        
+        fig_yearly = px.bar(yearly_stats, x='an', y=['productie', 'consum'],
+                           title='Yearly Production vs Consumption',
+                           barmode='group',
+                           labels={'value': 'Power (MW)', 'variable': 'Metric'})
         st.plotly_chart(fig_yearly, use_container_width=True)
     
     with col2:
-        # Seasonal analysis
-        seasonal_data = filtered_df.groupby('luna')['productie'].mean()
-        fig_seasonal = px.line(seasonal_data, title='Seasonal Production Patterns',
-                              labels={'value': 'Production (MW)', 'luna': 'Month'})
-        st.plotly_chart(fig_seasonal, use_container_width=True)
+        # Renewable energy growth
+        renewable_growth = df.groupby(['an', 'luna'])['procent_regenerabila'].mean().reset_index()
+        renewable_growth['period'] = renewable_growth['an'].astype(str) + '-' + renewable_growth['luna'].astype(str).str.zfill(2)
+        
+        fig_growth = px.line(renewable_growth, x='period', y='procent_regenerabila',
+                            title='Renewable Energy Percentage Trend',
+                            labels={'procent_regenerabila': 'Renewable %'})
+        st.plotly_chart(fig_growth, use_container_width=True)
 
+def create_data_explorer(df):
+    """Interactive data exploration section with enhanced range selection"""
+    st.markdown('<h2 class="section-header">Data Explorer</h2>', unsafe_allow_html=True)
+    
+    # Create columns for main controls
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Year range selection
+        available_years = sorted(df['an'].unique())
+        year_range = st.select_slider(
+            "Select Year Range",
+            options=available_years,
+            value=(available_years[0], available_years[-1])
+        )
+    
+    with col2:
+        # Month selection with checkboxes
+        st.write("Select Months:")
+        all_months = list(range(1, 13))
+        month_names = [datetime(2024, x, 1).strftime('%B') for x in all_months]
 
-def create_comprehensive_pdf():
-    """Enhanced PDF generation with professional layout"""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.lib import colors
-    import tempfile
-    import os
+        # Select all checkbox
+        select_all = st.checkbox("Select All Months", value=True)
+
+        if select_all:
+            selected_months = all_months
+        else:
+            selected_months = []
+            cols = st.columns(4)  # 3 columns for 12 months
+            for i, (month_num, month_name) in enumerate(zip(all_months, month_names)):
+                col_idx = i % 4
+                with cols[col_idx]:
+                    if st.checkbox(month_name, value=False, key=f"month_{month_num}"):
+                        selected_months.append(month_num)
+      
+
     
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
-    styles = getSampleStyleSheet()
-    story = []
+    # Filter data based on selections
+    start_year, end_year = year_range
+    filtered_data = df[
+        (df['an'] >= start_year) & 
+        (df['an'] <= end_year) & 
+        (df['luna'].isin(selected_months))
+    ]
+
     
-    # Title
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        spaceAfter=30,
-        alignment=1,
-        textColor=colors.HexColor('#1f77b4')
+    if not filtered_data.empty:
+        # Display statistics
+        st.subheader("Data Summary")
+        st.dataframe(
+            filtered_data.describe(),
+            use_container_width=True,
+            height=300
+        )
+        
+        # Display data preview
+        st.subheader("Data Preview")
+        st.dataframe(
+            filtered_data.head(100),
+            use_container_width=True,
+            height=400
+        )
+        
+        # Key metrics
+        st.subheader("Key Metrics")
+        col_metrics1, col_metrics2, col_metrics3, col_metrics4 = st.columns(4)
+        
+        with col_metrics1:
+            st.metric("Total Records", len(filtered_data))
+        
+        with col_metrics2:
+            st.metric("Date Range", f"{start_year}-{end_year}")
+        
+        with col_metrics3:
+            st.metric("Months Selected", len(selected_months))
+        
+        with col_metrics4:
+            if 'value' in df.columns:
+                st.metric("Average Value", f"{filtered_data['value'].mean():.2f}")
+        
+        # Download section
+        st.markdown("---")
+        st.subheader("Download Data")
+        
+        col_dl1, col_dl2 = st.columns([1, 2])
+        
+        with col_dl1:
+            # Download as CSV
+            csv = filtered_data.to_csv(index=False)
+            st.download_button(
+                label="📥 Download as CSV",
+                data=csv,
+                file_name=f"energy_data_{start_year}_to_{end_year}_months_{'-'.join(map(str, selected_months))}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        with col_dl2:
+            # Download as Excel
+            @st.cache_data
+            def convert_to_excel(df):
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='EnergyData')
+                return output.getvalue()
+            
+            excel_data = convert_to_excel(filtered_data)
+            st.download_button(
+                label="📊 Download as Excel",
+                data=excel_data,
+                file_name=f"energy_data_{start_year}_to_{end_year}.xlsx",
+                mime="application/vnd.ms-excel",
+                use_container_width=True
+            )
+        
+        # Show download size info
+        csv_size = len(csv) / 1024  # Size in KB
+        st.info(f"Dataset contains {len(filtered_data):,} records. Download size: {csv_size:.1f} KB")
+        
+    else:
+        st.warning("⚠️ No data available for the selected period and filters")
+        st.info("Try adjusting your date range or filter criteria to see more data.")
+
+# Alternative simpler version if you prefer the original layout but with range:
+def create_data_explorer_simple(df):
+    """Simplified version with range selection"""
+    st.markdown('<h2 class="section-header">Data Explorer</h2>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        available_years = sorted(df['an'].unique())
+        year_range = st.select_slider(
+            "Select Year Range",
+            options=available_years,
+            value=(available_years[0], available_years[-1])
+        )
+    
+    with col2:
+        st.write("Select Months:")
+        all_months = list(range(1, 13))
+        month_names = [datetime(2024, x, 1).strftime('%B') for x in all_months]
+
+        # Select all checkbox
+        select_all = st.checkbox("Select All Months", value=True)
+
+        if select_all:
+            selected_months = all_months
+        else:
+            selected_months = []
+            cols = st.columns(4)  # 3 columns for 12 months
+            for i, (month_num, month_name) in enumerate(zip(all_months, month_names)):
+                col_idx = i % 4
+                with cols[col_idx]:
+                    if st.checkbox(month_name, value=False, key=f"month_{month_num}"):
+                        selected_months.append(month_num)
+
+    start_year, end_year = year_range
+    filtered_data = df[
+        (df['an'] >= start_year) & 
+        (df['an'] <= end_year) & 
+        (df['luna'].isin(selected_months))
+    ]
+    
+    if not filtered_data.empty:
+        st.dataframe(
+            filtered_data.describe(),
+            use_container_width=True,
+            height=300
+        )
+        
+        # Download filtered data
+        csv = filtered_data.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Filtered Data",
+            data=csv,
+            file_name=f"energy_data_{start_year}_to_{end_year}.csv",
+            mime="text/csv"
+        )
+        
+        st.success(f"✅ Showing {len(filtered_data):,} records from {start_year} to {end_year}")
+    else:
+        st.warning("No data available for selected period")
+
+def main():
+    """Main application function"""
+    
+    # Header section
+    st.markdown('<h1 class="main-header">⚡ Energy Analytics Dashboard</h1>', unsafe_allow_html=True)
+    st.markdown("**Academic Research Platform | Data Visualization & Analysis**")
+    
+    # Sidebar configuration
+    st.sidebar.header("🔧 Control Panel")
+    
+    # File upload section
+    st.sidebar.subheader("📁 Data Source")
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload Energy Data CSV",
+        type=['csv'],
+        help="Upload your energy data CSV file with columns similar to the default dataset"
     )
-    story.append(Paragraph("Energy Data Analysis Report", title_style))
     
-    # Period information
-    story.append(Paragraph(f"Analysis Period: {start_date} to {end_date}", styles['Normal']))
-    story.append(Paragraph(f"Selected Energy Sources: {', '.join(selected_sources)}", styles['Normal']))
-    story.append(Spacer(1, 20))
+    # Load data
+    df = load_data(uploaded_file)
     
-    # Key statistics table
-    stats_data = [['Metric', 'Value']]
-    stats_data.extend([
-        ['Total Production', f"{filtered_df['productie'].sum():,.0f} MW"],
-        ['Average Renewable %', f"{filtered_df['procent_regenerabila'].mean():.1f}%"],
-        ['Peak Production', f"{filtered_df['productie'].max():,.0f} MW"],
-        ['Energy Balance', f"{filtered_df['sold_energetic'].mean():.1f} MW"]
+    if df is None:
+        st.error("Unable to load data. Please check your file format or use the default dataset.")
+        return
+    
+    # Date range filter
+    st.sidebar.subheader("📅 Date Range")
+    min_date, max_date = df['date'].min().date(), df['date'].max().date()
+    date_range = st.sidebar.date_input(
+        "Select Analysis Period",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date
+    )
+    
+    if len(date_range) == 2:
+        start_date, end_date = date_range
+        df = df[(df['date'].dt.date >= start_date) & (df['date'].dt.date <= end_date)]
+    
+    # Energy source selection
+    st.sidebar.subheader("🔋 Energy Sources")
+    energy_sources = {
+        'Renewable': ['hidro', 'eolian', 'fotovolt', 'biomasa'],
+        'Conventional': ['carbune', 'hidrocarburi', 'nuclear']
+    }
+    
+    selected_sources = []
+    for category, sources in energy_sources.items():
+        st.sidebar.markdown(f"**{category}**")
+        for source in sources:
+            if st.sidebar.checkbox(
+                f"{source.title()}",
+                value=True,
+                key=f"source_{source}"
+            ):
+                selected_sources.append(source)
+    
+    # Display professional metrics
+    st.markdown("---")
+    create_professional_metrics(df)
+    st.markdown("---")
+    
+    # Tab-based navigation
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Overview", 
+        "🔍 Source Analysis", 
+        "🕒 Time Patterns", 
+        "📈 Comparisons", 
+        "💾 Data Explorer"
     ])
     
-    stats_table = Table(stats_data)
-    stats_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    story.append(stats_table)
-    story.append(Spacer(1, 30))
+    with tab1:
+        create_production_overview(df)
     
-    # Create and save charts with proper file handling
-    temp_files = []  # Keep track of temp files
+    with tab2:
+        create_source_analysis(df, selected_sources)
     
-    try:
-        # Chart 1: Monthly production pattern
-        fig, ax = plt.subplots(figsize=(8, 4))
-        monthly_data = filtered_df.groupby('luna')['productie'].mean()
-        monthly_data.plot(kind='bar', ax=ax, color='skyblue', alpha=0.7)
-        ax.set_title('Monthly Production Pattern')
-        ax.set_xlabel('Month')
-        ax.set_ylabel('Average Production (MW)')
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        
-        # Save to temporary file
-        temp_img1 = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-        plt.savefig(temp_img1.name, dpi=150, bbox_inches='tight')
-        temp_files.append(temp_img1.name)
-        plt.close(fig)  # Explicitly close the figure to release the file
-        
-        story.append(Paragraph("Monthly Production Pattern", styles['Heading2']))
-        story.append(Image(temp_img1.name, width=6*inch, height=3*inch))
-        story.append(Spacer(1, 20))
-        
-    except Exception as e:
-        story.append(Paragraph(f"Chart 1 generation error: {str(e)}", styles['Normal']))
+    with tab3:
+        create_temporal_analysis(df)
     
-    try:
-        # Chart 2: Energy source distribution
-        fig2, ax2 = plt.subplots(figsize=(8, 4))
-        energy_totals = filtered_df[selected_sources].sum()
-        ax2.pie(energy_totals.values, labels=energy_totals.index, autopct='%1.1f%%', startangle=90)
-        ax2.set_title('Energy Source Distribution')
-        
-        temp_img2 = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-        plt.savefig(temp_img2.name, dpi=150, bbox_inches='tight')
-        temp_files.append(temp_img2.name)
-        plt.close(fig2)  # Explicitly close the figure
-        
-        story.append(Paragraph("Energy Source Distribution", styles['Heading2']))
-        story.append(Image(temp_img2.name, width=6*inch, height=3*inch))
-        
-    except Exception as e:
-        story.append(Paragraph(f"Chart 2 generation error: {str(e)}", styles['Normal']))
+    with tab4:
+        create_comparative_analysis(df)
     
-    # Build the PDF
-    doc.build(story)
-    buffer.seek(0)
+    with tab5:
+        create_data_explorer(df)
     
-    # Clean up temporary files after PDF is built
-    for temp_file in temp_files:
-        try:
-            os.unlink(temp_file)
-        except Exception as e:
-            print(f"Warning: Could not delete temporary file {temp_file}: {e}")
+    # Insights section
+    with st.expander("🎓 Academic Insights & Methodology", expanded=False):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Key Findings")
+            st.markdown("""
+            - **Renewable Integration**: Analysis of sustainable energy source penetration
+            - **Demand Patterns**: Identification of consumption peaks and seasonal variations  
+            - **Grid Efficiency**: Evaluation of production-consumption balance
+            - **Source Correlations**: Understanding energy source complementarity
+            """)
+        
+        with col2:
+            st.subheader("Methodology")
+            st.markdown("""
+            - **Data Preprocessing**: Cleaning, validation, and feature engineering
+            - **Time Series Analysis**: Trend decomposition and pattern recognition
+            - **Statistical Modeling**: Correlation and comparative analysis
+            - **Interactive Visualization**: Multi-dimensional data exploration
+            """)
     
-    return buffer.getvalue()
-
-# PDF generation section
-st.sidebar.markdown("---")
-st.sidebar.subheader("📊 Report Generation")
-
-if st.sidebar.button("🔄 Generate Comprehensive Report"):
-    with st.spinner("Generating professional report..."):
-        pdf_bytes = create_comprehensive_pdf()
-        st.sidebar.download_button( 
-            "📥 Download Full Report",
-            data=pdf_bytes,
-            file_name=f"energy_analysis_report_{datetime.datetime.now()}.pdf",
-            mime="application/pdf"
-        )
-
-
-# Add presentation mode
-st.sidebar.markdown("---")
-st.sidebar.subheader("🎓 Presentation Mode")
-
-if st.sidebar.checkbox("Enable Presentation Mode"):
+    # Footer
+    st.markdown("---")
     st.markdown("""
-    <style>
-    .main > div {
-        max-width: 100%;
-        padding-left: 5%;
-        padding-right: 5%;
-    }
-    </style>
+    <div style='text-align: center'>
+        <p><strong>Academic Research Project | Master in Data Science</strong></p>
+        <p>Advanced Data Visualization Techniques | Energy Analytics Platform</p>
+    </div>
     """, unsafe_allow_html=True)
 
-# Key insights section
-with st.expander("🔍 Key Academic Insights", expanded=True):
-    st.write("""
-    **Data Analysis Highlights:**
-    - **Renewable Energy Trends**: Observe the growth patterns of sustainable energy sources
-    - **Consumption Patterns**: Identify peak usage hours and seasonal variations
-    - **Energy Balance**: Analyze the relationship between production and consumption
-    - **Source Correlation**: Understand how different energy sources complement each other
-    """)
-
-# Methodology section
-with st.expander("📚 Methodology"):
-    st.write("""
-    **Analysis Approach:**
-    - Data preprocessing and cleaning
-    - Time series decomposition
-    - Comparative statistical analysis
-    - Interactive visualization techniques
-    - Pattern recognition and trend analysis
-    """)
-
-# Footer with academic context
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center'>
-    <p><strong>Academic Project - Data Visualization Course</strong></p>
-    <p>Demonstrating advanced data analysis techniques and interactive visualization capabilities</p>
-</div>
-""", unsafe_allow_html=True)
-
-
-
+if __name__ == "__main__":
+    main()
