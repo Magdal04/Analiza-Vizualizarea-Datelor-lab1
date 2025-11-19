@@ -5,4 +5,5 @@ raw_energy_data.csv -      default energy data analyzed by the main.py and lab1_
 
 
 
-Project made by Calfa Magdalen, masters student at USM in group IASD-2501. At 19 Nov 2025
+Project made by Calfa Magdalen, masters student at USM in group IASD-2501. 
+Date: 19 Nov 2025
